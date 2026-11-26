@@ -225,6 +225,8 @@ export default function BrowseScreen() {
           onSaveMany={handleSaveMany}
           onDelete={handleDelete}
           onCancel={() => setEditCard(undefined)}
+          cards={cards}
+          deckId={deck.id}
         />
       )}
 

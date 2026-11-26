@@ -38,10 +38,11 @@ function litColor(s) {
   return '#c0392b'                      // crucial
 }
 
-// Moon fullness: cards cleared (hard+good+easy) ÷ the day's queued total.
+// Moon fullness: cards cleared ÷ the day's queued total.
+// Rows logged before `cleared` existed fall back to hard+good+easy.
 // Legacy rows have no `queued` → treat as fully completed.
 function completion(s) {
-  const cleared = s.hard + s.good + s.easy
+  const cleared = s.cleared ?? s.hard + s.good + s.easy
   if (!s.queued) return 1
   return Math.min(cleared / s.queued, 1)
 }

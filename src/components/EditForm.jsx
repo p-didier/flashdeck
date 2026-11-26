@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IMPORTANCES } from '../cards.js'
+import { IMPORTANCES, cardId } from '../cards.js'
 import { parseBatch } from '../batch.js'
 import { getToday } from '../srs.js'
 
@@ -28,8 +28,12 @@ function Optional() {
  * onSaveMany : (cards: object[]) => void
  *     Batch tab, import-shaped cards.
  * onDelete, onCancel : () => void
+ * cards : object[]
+ *     Stored cards of the deck, used to refuse a front that already exists.
+ * deckId : string
+ *     The deck, to compute the id a new card would get.
  */
-export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel }) {
+export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel, cards = [], deckId }) {
   const isNew = card === null
 
   const [front,      setFront]      = useState(card?.front ?? '')
@@ -41,7 +45,16 @@ export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel 
 
   const [mode, setMode]           = useState('single')
   const [batchText, setBatchText] = useState('')
-  const batch = isNew && mode === 'batch' ? parseBatch(batchText, getToday()) : null
+  // Saving a new card whose id or front already exists would merge into that card
+  // (upsertCards) and overwrite its back, extra, notes and importance.
+  const taken = f => {
+    const t = f.trim()
+    if (!isNew) return cards.some(c => c.id !== card.id && c.front === t)
+    const id = deckId && cardId(t, deckId)
+    return cards.some(c => c.id === id || c.front === t)
+  }
+  const batch = isNew && mode === 'batch' ? withoutTaken(parseBatch(batchText, getToday()), taken) : null
+  const frontTaken = !batch && front.trim() !== '' && taken(front)
 
   function handleSave() {
     if (batch) { onSaveMany(batch.cards); return }
@@ -49,7 +62,7 @@ export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel 
     onSave({ front: front.trim(), back: back.trim(), extra: extra.trim() || null, notes: notes.trim() || null, importance })
   }
 
-  const canSave = batch ? batch.cards.length > 0 : front.trim() && back.trim()
+  const canSave = batch ? batch.cards.length > 0 : front.trim() && back.trim() && !frontTaken
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/60">
@@ -84,6 +97,9 @@ export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel 
                 <label className={LABEL}>Front</label>
                 <textarea value={front} onChange={e => setFront(e.target.value)} rows={2}
                   placeholder="The prompt, e.g. capital of Australia" className={`${INPUT} text-lg resize-y`} />
+                {frontTaken && (
+                  <p className="text-xs text-crucial">A card with this front is already in this deck. Edit that one in Browse instead.</p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -155,6 +171,15 @@ export default function EditForm({ card, onSave, onSaveMany, onDelete, onCancel 
   )
 }
 
+/** Move batch cards whose front is already in the deck from `cards` to `errors`. */
+function withoutTaken({ cards, errors }, taken) {
+  const dup = cards.filter(c => taken(c.front))
+  return {
+    cards: cards.filter(c => !taken(c.front)),
+    errors: [...errors, ...dup.map(c => `"${c.front}" is already in this deck`)],
+  }
+}
+
 /** The Batch tab: a textarea plus a live preview, where a stray ";" inside an answer shows up before anything is saved. */
 function BatchPane({ text, setText, result }) {
   return (
@@ -171,7 +196,8 @@ function BatchPane({ text, setText, result }) {
         <p className="text-[11px] text-muted leading-relaxed">
           One card per line or per <code>;</code>, written <code>front = back</code>. Start a line with <code>!</code> for
           important or <code>!!</code> for crucial. Every card is tagged with today's date. A <code>;</code> inside an
-          answer splits the entry, so use a comma there.
+          answer splits the entry, so use a comma there. The first <code>=</code> splits front from back, so add a
+          front that contains <code>=</code> in the Single tab.
         </p>
       </div>
 

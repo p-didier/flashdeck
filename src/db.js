@@ -94,7 +94,45 @@ export async function deleteCard(id) {
 // ── Review log ────────────────────────────────────────────────────────────────
 
 const RATING_FIELD = { 0: 'again', 2: 'hard', 3: 'good', 5: 'easy' }
-const EMPTY_DAY = { cardsReviewed: 0, again: 0, hard: 0, good: 0, easy: 0, queued: 0, newReviewed: 0 }
+// Per deck and day:
+// - cardsReviewed: distinct cards rated, counted on their first rating of the session.
+// - again, hard, good, easy: that first rating, so retention is first-try recall.
+// - newReviewed: distinct new cards, the daily new-card limit.
+// - cleared: cards that left the queue (rated above Again), the Day Completion numerator.
+// - queued: largest session size of the day, the Day Completion denominator.
+const EMPTY_DAY = { cardsReviewed: 0, again: 0, hard: 0, good: 0, easy: 0, queued: 0, newReviewed: 0, cleared: 0 }
+
+/**
+ * Counters after applying (sign 1) or reversing (sign -1) one rating.
+ *
+ * Parameters
+ * ----------
+ * s : object
+ *     One deck's day counters, see EMPTY_DAY.
+ * q : number
+ *     Rating, 0 | 2 | 3 | 5.
+ * first : boolean
+ *     First rating of this card in the session. Repeats of a failed card only move `cleared`.
+ * isNew : boolean
+ *     The card had never been reviewed.
+ * sign : number
+ *     1 to record, -1 to undo.
+ *
+ * Returns
+ * -------
+ * object
+ *     New counters, floored at 0.
+ */
+export function applyRating(s, q, { first, isNew }, sign) {
+  const field = RATING_FIELD[q]
+  const out = { ...EMPTY_DAY, ...s }
+  const bump = (k, on) => { if (on) out[k] = Math.max(0, out[k] + sign) }
+  bump('cardsReviewed', first)
+  bump(field, first)
+  bump('newReviewed', first && isNew)
+  bump('cleared', q !== 0)
+  return out
+}
 
 /**
  * Record one rating as it happens, so abandoned sessions still count.
@@ -106,48 +144,28 @@ const EMPTY_DAY = { cardsReviewed: 0, again: 0, hard: 0, good: 0, easy: 0, queue
  * deckId : string
  *     Deck the card belongs to.
  * q : number
- *     Rating, 0 | 2 | 3 | 5.
+ *     Rating actually applied, 0 | 2 | 3 | 5.
  * queued : number
  *     Size of the session. The day keeps the largest, which is the Day Completion denominator.
- * isNew : boolean
- *     The card had never been reviewed. Counts toward the daily new-card limit.
+ * flags : { first: boolean, isNew: boolean }
+ *     See applyRating.
  */
-export async function recordRating(date, deckId, q, queued, isNew = false) {
-  const field = RATING_FIELD[q]
-  if (!field) return
+export async function recordRating(date, deckId, q, queued, flags) {
+  if (!RATING_FIELD[q]) return
   await db.transaction('rw', db.reviewLog, async () => {
     const row = (await db.reviewLog.get(date)) ?? { date }
-    const s = row[deckId] ?? EMPTY_DAY
-    await db.reviewLog.put({
-      ...row,
-      [deckId]: {
-        ...s,
-        cardsReviewed: s.cardsReviewed + 1,
-        [field]: s[field] + 1,
-        queued: Math.max(s.queued, queued),
-        newReviewed: s.newReviewed + (isNew ? 1 : 0),
-      },
-    })
+    const s = applyRating(row[deckId], q, flags, 1)
+    await db.reviewLog.put({ ...row, [deckId]: { ...s, queued: Math.max(s.queued, queued) } })
   })
 }
 
-/** Reverse a single rating, used by the in-session undo. */
-export async function unrecordRating(date, deckId, q, isNew = false) {
-  const field = RATING_FIELD[q]
-  if (!field) return
+/** Reverse a single rating, used by the in-session undo. Same flags as recordRating. */
+export async function unrecordRating(date, deckId, q, flags) {
+  if (!RATING_FIELD[q]) return
   await db.transaction('rw', db.reviewLog, async () => {
     const row = await db.reviewLog.get(date)
-    const s = row?.[deckId]
-    if (!s) return
-    await db.reviewLog.put({
-      ...row,
-      [deckId]: {
-        ...s,
-        cardsReviewed: Math.max(0, s.cardsReviewed - 1),
-        [field]: Math.max(0, s[field] - 1),
-        newReviewed: Math.max(0, s.newReviewed - (isNew ? 1 : 0)),
-      },
-    })
+    if (!row?.[deckId]) return
+    await db.reviewLog.put({ ...row, [deckId]: applyRating(row[deckId], q, flags, -1) })
   })
 }
 

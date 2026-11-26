@@ -62,11 +62,12 @@ export default function ReviewScreen() {
   const navigate = useNavigate()
   const location = useLocation()
   const config   = location.state ?? DEFAULT_SESSION_CONFIG
-  const { reload, deck } = useDeck()
+  const { reload, deck, cards } = useDeck()
   const deckId = deck?.id
 
   const [queue, setQueue]               = useState([])
-  const [history, setHistory]           = useState([]) // [{ card, prevSRS, q }]
+  // [{ card, prevSRS, q, first, addedLeech }]. q is the rating applied, first marks the card's first rating this session.
+  const [history, setHistory]           = useState([])
   const [requeuedIds, setRequeuedIds]   = useState(new Set())
   const [clearedIds, setClearedIds]     = useState(new Set())
   const [finalRatings, setFinalRatings] = useState({ 2: 0, 3: 0, 5: 0 })
@@ -74,6 +75,10 @@ export default function ReviewScreen() {
   const [loading, setLoading]           = useState(true)
   const [editingCard, setEditingCard]   = useState(null)
   const originalCountRef                = useRef(0)
+  // Ids rated at least once this session. A second rating is relearning and is not logged again.
+  const seenIdsRef                      = useRef(new Set())
+  // Set while a rating or an undo is being written, so a double tap cannot rate twice or skip a card.
+  const busyRef                         = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -120,57 +125,82 @@ export default function ReviewScreen() {
   }, [isActive])
 
   async function handleRate(q, responseTimeMs) {
-    const card = queue[0]
-    const wasNew = card.srs.repetitions === 0
+    if (busyRef.current) return
+    busyRef.current = true
+    try {
+      const card  = queue[0]
+      const first = !seenIdsRef.current.has(card.id)
+      const flags = { first, isNew: card.srs.repetitions === 0 }
 
-    const qEff  = effectiveQ(card.srs, q, responseTimeMs)
-    let newSRS  = updateSRS(card.srs, qEff, getToday())
-    if (responseTimeMs !== null) newSRS = recordResponseTime(newSRS, responseTimeMs)
+      const qEff  = effectiveQ(card.srs, q, responseTimeMs)
+      let newSRS  = updateSRS(card.srs, qEff, getToday(), { relearning: !first })
+      if (responseTimeMs !== null) newSRS = recordResponseTime(newSRS, responseTimeMs)
 
-    // Write at once, even for Again, so a closed tab loses nothing.
-    await updateCardSRS(card.id, newSRS)
-    // Log the rating now so partial/abandoned sessions still count (per-day).
-    await recordRating(getToday(), deckId, q, originalCountRef.current, wasNew)
+      // Write at once, even for Again, so a closed tab loses nothing.
+      await updateCardSRS(card.id, newSRS)
+      // Log the rating now so partial/abandoned sessions still count (per-day).
+      await recordRating(getToday(), deckId, qEff, originalCountRef.current, flags)
+      seenIdsRef.current.add(card.id)
 
-    let updatedCard = { ...card, srs: newSRS }
+      let updatedCard = { ...card, srs: newSRS }
 
-    // Leech: after 8 lapses (Anki default) the card gets a filterable tag. Nothing else happens.
-    if (newSRS.lapses >= LEECH_THRESHOLD && !(card.tags ?? []).includes('leech')) {
-      const tags = [...(card.tags ?? []), 'leech']
-      await updateCard(card.id, { tags })
-      updatedCard = { ...updatedCard, tags }
-    }
+      // Leech: after 8 lapses (Anki default) the card gets a filterable tag. Nothing else happens.
+      const addedLeech = newSRS.lapses >= LEECH_THRESHOLD && !(card.tags ?? []).includes('leech')
+      if (addedLeech) {
+        const tags = [...(card.tags ?? []), 'leech']
+        await updateCard(card.id, { tags })
+        updatedCard = { ...updatedCard, tags }
+      }
 
-    if (q === 0) {
-      setQueue(prev => [...prev.slice(1), updatedCard])
-      setRequeuedIds(prev => new Set([...prev, card.id]))
-      setHistory(prev => [...prev, { card, prevSRS: card.srs, q }])
-    } else {
-      setQueue(prev => prev.slice(1))
-      setRequeuedIds(prev => { const n = new Set(prev); n.delete(card.id); return n })
-      setClearedIds(prev => new Set([...prev, card.id]))
-      setFinalRatings(prev => ({ ...prev, [q]: prev[q] + 1 }))
-      setHistory(prev => [...prev, { card, prevSRS: card.srs, q }])
+      setHistory(prev => [...prev, { card, prevSRS: card.srs, q: qEff, first, addedLeech }])
+      if (qEff === 0) {
+        setQueue(prev => [...prev.slice(1), updatedCard])
+        setRequeuedIds(prev => new Set([...prev, card.id]))
+      } else {
+        setQueue(prev => prev.slice(1))
+        setRequeuedIds(prev => { const n = new Set(prev); n.delete(card.id); return n })
+        setClearedIds(prev => new Set([...prev, card.id]))
+        setFinalRatings(prev => ({ ...prev, [qEff]: prev[qEff] + 1 }))
+      }
+    } finally {
+      busyRef.current = false
     }
   }
 
   async function handleBack() {
     const last = history[history.length - 1]
-    if (!last) return
+    if (!last || busyRef.current) return
+    busyRef.current = true
+    try {
+      const { card, prevSRS, q, first, addedLeech } = last
+      await updateCardSRS(card.id, prevSRS)
+      await unrecordRating(getToday(), deckId, q, { first, isNew: prevSRS.repetitions === 0 })
+      if (addedLeech) await updateCard(card.id, { tags: card.tags ?? [] })
+      if (first) seenIdsRef.current.delete(card.id)
+      setHistory(prev => prev.slice(0, -1))
 
-    await updateCardSRS(last.card.id, last.prevSRS)
-    await unrecordRating(getToday(), deckId, last.q, last.prevSRS.repetitions === 0)
-    setHistory(prev => prev.slice(0, -1))
-
-    if (last.q === 0) {
-      // Card is still in the queue tail; remove it and put it back at the front.
-      setQueue(prev => [{ ...last.card, srs: last.prevSRS }, ...prev.filter(c => c.id !== last.card.id)])
-      setRequeuedIds(prev => { const n = new Set(prev); n.delete(last.card.id); return n })
-    } else {
-      setQueue(prev => [{ ...last.card, srs: last.prevSRS }, ...prev])
-      setClearedIds(prev => { const n = new Set(prev); n.delete(last.card.id); return n })
-      setFinalRatings(prev => ({ ...prev, [last.q]: prev[last.q] - 1 }))
+      const restored = { ...card, srs: prevSRS }
+      // An Again leaves the card at the queue tail, so take it out before putting it back in front.
+      setQueue(prev => [restored, ...prev.filter(c => c.id !== card.id)])
+      setRequeuedIds(prev => {
+        const n = new Set(prev)
+        // A repeat rating means the card had been failed earlier, so it is pending again.
+        if (first) n.delete(card.id); else n.add(card.id)
+        return n
+      })
+      if (q !== 0) {
+        setClearedIds(prev => { const n = new Set(prev); n.delete(card.id); return n })
+        setFinalRatings(prev => ({ ...prev, [q]: prev[q] - 1 }))
+      }
+    } finally {
+      busyRef.current = false
     }
+  }
+
+  // Content change on one card, applied to the queue and to the undo history so an undo shows the new text.
+  function patchCard(id, fields) {
+    setQueue(prev => prev.map(c => (c.id === id ? { ...c, ...fields } : c)))
+    setHistory(prev => prev.map(h => (h.card.id === id ? { ...h, card: { ...h.card, ...fields } } : h)))
   }
 
   // Change the current card's cruciality inline, without leaving the review.
@@ -178,14 +208,14 @@ export default function ReviewScreen() {
     const card = queue[0]
     if (!card || card.importance === importance) return
     await updateCard(card.id, { importance })
-    setQueue(prev => prev.map(c => (c.id === card.id ? { ...c, importance } : c)))
+    patchCard(card.id, { importance })
   }
 
   // Save edits made on the fly; merge content fields into the queued card.
   async function handleEditSave(fields) {
     const id = editingCard.id
     await updateCard(id, fields)
-    setQueue(prev => prev.map(c => (c.id === id ? { ...c, ...fields } : c)))
+    patchCard(id, fields)
     setEditingCard(null)
   }
 
@@ -193,6 +223,8 @@ export default function ReviewScreen() {
     const id = editingCard.id
     await deleteCard(id)
     setQueue(prev => prev.filter(c => c.id !== id))
+    // Undoing a rating of a deleted card would put it back on screen with nothing behind it.
+    setHistory(prev => prev.filter(h => h.card.id !== id))
     setRequeuedIds(prev => { const n = new Set(prev); n.delete(id); return n })
     setEditingCard(null)
   }
@@ -244,7 +276,9 @@ export default function ReviewScreen() {
 
       <div className="flex-1 flex flex-col justify-center pb-4">
         <FlipCard
-          key={queue[0].id}
+          // history.length in the key remounts the card after every rating, so a lone
+          // card failed again comes back unflipped instead of stuck on its answer.
+          key={`${queue[0].id}:${history.length}`}
           card={queue[0]}
           onRate={handleRate}
           onEdit={() => setEditingCard(queue[0])}
@@ -258,6 +292,8 @@ export default function ReviewScreen() {
           onSave={handleEditSave}
           onDelete={handleEditDelete}
           onCancel={() => setEditingCard(null)}
+          cards={cards}
+          deckId={deckId}
         />
       )}
 

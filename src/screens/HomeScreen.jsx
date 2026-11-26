@@ -89,6 +89,24 @@ function BackupNudge() {
   )
 }
 
+// iPadOS reports itself as a Mac, so a touch Mac counts as iOS too.
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+const IS_INSTALLED = navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)').matches
+
+/**
+ * Safari on iOS deletes a website's stored data after 7 days of browsing without
+ * a visit to it. Apps added to the Home Screen are exempt, so ask for that.
+ */
+function IosInstallHint() {
+  if (!IS_IOS || IS_INSTALLED) return null
+  return (
+    <p className="max-w-xs text-xs text-important leading-relaxed">
+      On iPhone, Safari erases your cards after a week without opening this page. Tap Share, then{' '}
+      <strong>Add to Home Screen</strong>, and open flashdeck from there.
+    </p>
+  )
+}
+
 function HomeInner() {
   const { deck, cards } = useDeck()
   const navigate = useNavigate()
@@ -184,6 +202,7 @@ function HomeInner() {
           </button>
 
           <BackupNudge />
+          <IosInstallHint />
           <Link to="/help" className="text-xs text-muted underline underline-offset-2">How to use</Link>
         </Centered>
       )}

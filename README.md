@@ -8,7 +8,7 @@ Live app: https://p-didier.github.io/flashdeck/
 
 Open the link, then either name a first deck or tap "try a sample deck". The in-app "How to use" page covers reviewing, adding cards, importing and backups.
 
-On a phone, open the link in Chrome or Safari and choose "Add to Home Screen".
+On a phone, open the link in Chrome or Safari and choose "Add to Home Screen". On an iPhone or iPad this matters: Safari deletes a website's stored data after 7 days of browsing without a visit, and apps on the Home Screen are exempt.
 
 Cards live in the browser's storage (IndexedDB) on that one device. Clearing site data erases them, so take a backup now and then (Import screen, "Back up all decks"). Home reminds you after 7 days without one.
 
@@ -18,7 +18,7 @@ Cards live in the browser's storage (IndexedDB) on that one device. Clearing sit
 - **Scheduling.** Anki's variant of SM-2, with Again, Hard, Good and Easy ratings and Anki's default limits (20 new and 200 review cards per deck and day).
 - **Recall check.** "I Know" or "I Don't Know" before the card flips. A slow "Easy" counts as "Good".
 - **Importance.** Cards are crucial, important or normal. Crucial cards come first, and a session can be limited to them.
-- **Adding cards.** One at a time, as a batch (`front = back`, one per line), or from a JSON file.
+- **Adding cards.** One at a time, as a batch (`front = back`, one per line or per `;`, split on the first `=`), or from a JSON file. A new card whose front is already in the deck is refused.
 - **Stats.** Streak, daily activity, 7-day retention and New, Learning and Mature counts.
 
 ## Card format

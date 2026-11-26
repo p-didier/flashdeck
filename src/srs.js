@@ -9,6 +9,8 @@
  * - New cards graduate over days (Good → 1d, Easy → 4d); no sub-day learning steps.
  * - Review intervals are fuzzed and grow by at least 1 day (Anki invariants).
  * - Again on a review card is a lapse: interval reset + lapses++ (drives leech).
+ * - A lapsed card rated again in the same session is relearning: no second lapse,
+ *   no ease change, due after the 1-day lapse interval (Anki relearning steps).
  */
 
 // ── Anki scheduler constants (hardcoded defaults) ──────────────────────────────
@@ -32,11 +34,34 @@ export const REVIEW_PER_DAY  = 200
  * Apply a rating to a card's SRS state and return the next state. Spreads the
  * prior srs so per-card Response Time calibration (avgResponseMs/responseCount)
  * and the lapse counter survive ratings that don't touch them.
- * `fuzz` is injectable so the self-tests can disable randomisation.
+ *
+ * Parameters
+ * ----------
+ * srs : object
+ *     Current scheduler state, see newSRS in cards.js.
+ * q : number
+ *     Rating, 0 | 2 | 3 | 5.
+ * today : string
+ *     YYYY-MM-DD.
+ * options.fuzz : (ivl: number) => number
+ *     Interval fuzz, injectable so the tests can disable randomisation.
+ * options.relearning : boolean
+ *     The card was already rated in this session. Only a lapsed review card can
+ *     come back, so for review cards this is the relearning step.
+ *
+ * Returns
+ * -------
+ * object
+ *     Next scheduler state.
  */
-export function updateSRS(srs, q, today, fuzz = fuzzInterval) {
+export function updateSRS(srs, q, today, { fuzz = fuzzInterval, relearning = false } = {}) {
   let { interval, easeFactor, repetitions } = srs
   let lapses = srs.lapses ?? 0
+
+  // Relearning a lapsed review card: the lapse already cost ease and a lapse
+  // count, so a repeat Again must not charge again (one bad session would floor
+  // ease and make a leech). A new card in learning (repetitions 0) is unaffected.
+  if (relearning && repetitions > 0) return { ...srs, due: addDays(today, interval) }
 
   if (repetitions === 0) {
     // Learning: ease is not adjusted until the card reaches review.

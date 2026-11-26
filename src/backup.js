@@ -43,8 +43,11 @@ export function parseBackup(data) {
 
   const badDeck = data.decks.findIndex(d => !d || typeof d.id !== 'string' || typeof d.name !== 'string')
   if (badDeck !== -1) throw new Error(`Deck ${badDeck} has no id or name. Nothing was restored.`)
-  const badCard = data.cards.findIndex(c => !c || typeof c.id !== 'string' || typeof c.deckId !== 'string' || !c.srs)
-  if (badCard !== -1) throw new Error(`Card ${badCard} has no id, deck or srs. Nothing was restored.`)
+  const badCard = data.cards.findIndex(c =>
+    !c || typeof c.id !== 'string' || typeof c.deckId !== 'string' || typeof c.srs?.due !== 'string')
+  if (badCard !== -1) throw new Error(`Card ${badCard} has no id, deck or schedule. Nothing was restored.`)
+  const badDay = data.reviewLog.findIndex(r => !r || typeof r.date !== 'string')
+  if (badDay !== -1) throw new Error(`History row ${badDay} has no date. Nothing was restored.`)
 
   return { decks: data.decks, cards: data.cards, reviewLog: data.reviewLog }
 }
@@ -68,7 +71,8 @@ async function shareOrDownload(file) {
   a.href = url
   a.download = file.name
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoking in the same tick can cancel the download in some Safari versions.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
   return 'downloaded'
 }
 
@@ -95,14 +99,44 @@ export function lastBackupAt() {
 }
 
 /**
+ * Pure: merge one day of review history from a backup into the stored day.
+ *
+ * Rows are keyed by date and hold one counter object per deck. Per deck, the
+ * entry with more cards reviewed wins, so restoring an old backup never erases
+ * what was logged on this device since.
+ *
+ * Parameters
+ * ----------
+ * stored : object | undefined
+ *     The row already in the database, `{ date, [deckId]: counters }`.
+ * incoming : object
+ *     The row from the backup, same shape.
+ *
+ * Returns
+ * -------
+ * object
+ *     The merged row.
+ */
+export function mergeLogRow(stored, incoming) {
+  if (!stored) return incoming
+  const out = { ...stored }
+  for (const [k, s] of Object.entries(incoming)) {
+    if (k === 'date') continue
+    if ((s?.cardsReviewed ?? 0) > (stored[k]?.cardsReviewed ?? -1)) out[k] = s
+  }
+  return out
+}
+
+/**
  * Write a validated backup back. bulkPut overwrites matching ids and leaves
  * everything else alone, so a restore merges instead of wiping: cards added
- * since the backup was taken survive.
+ * since the backup was taken survive. History merges per day and deck, see mergeLogRow.
  */
 export async function restoreBackup({ decks, cards, reviewLog }) {
   await db.transaction('rw', db.decks, db.cards, db.reviewLog, async () => {
     await db.decks.bulkPut(decks)
     await db.cards.bulkPut(cards)
-    await db.reviewLog.bulkPut(reviewLog)
+    const stored = await db.reviewLog.bulkGet(reviewLog.map(r => r.date))
+    await db.reviewLog.bulkPut(reviewLog.map((r, i) => mergeLogRow(stored[i], r)))
   })
 }

@@ -48,9 +48,14 @@ function BackupPanel() {
   }
 
   async function handleRestore() {
-    await restoreBackup(preview)
-    await reload()
-    setMsg({ ok: true, text: `Restored ${preview.decks.length} decks and ${preview.cards.length} cards.` })
+    try {
+      await restoreBackup(preview)
+      await reload()
+      setMsg({ ok: true, text: `Restored ${preview.decks.length} decks and ${preview.cards.length} cards.` })
+    } catch (err) {
+      // The restore runs in one transaction, so a failure leaves the database as it was.
+      setMsg({ ok: false, text: `Restore failed, nothing was changed: ${err.message}` })
+    }
     setPreview(null)
     setInputKey(k => k + 1)
   }
@@ -129,10 +134,16 @@ function ImportPanel() {
   }
 
   async function handleConfirm() {
-    const { added, updated } = await upsertCards(parsed, deck.id, getToday())
-    await reload()
-    setMessage(`${added} added, ${updated} updated.`)
-    setStatus('done')
+    try {
+      const { added, updated } = await upsertCards(parsed, deck.id, getToday())
+      await reload()
+      setMessage(`${added} added, ${updated} updated.`)
+      setStatus('done')
+    } catch (err) {
+      // upsertCards runs in one transaction, so a failure adds nothing.
+      setMessage(`Nothing was imported: ${err.message}`)
+      setStatus('error')
+    }
     setParsed(null)
     setInputKey(k => k + 1)
   }

@@ -6,6 +6,8 @@ import { test } from 'node:test'
 import { cardId, mergeImport, toCard, validateImportCard } from '../src/cards.js'
 import { parseBatch, parseBatchEntry } from '../src/batch.js'
 import { applyDailyLimits, effectiveQ, fuzzInterval, recordResponseTime, updateSRS } from '../src/srs.js'
+import { applyRating } from '../src/db.js'
+import { mergeLogRow, parseBackup } from '../src/backup.js'
 
 const T = '2024-01-01'
 const noFuzz = x => Math.round(x) // deterministic intervals
@@ -14,22 +16,53 @@ const DECK_B = '0b5e9f3a-2c4d-4e6f-8a1b-3c5d7e9f1a2b'
 
 test('srs: learning phase', () => {
   const card = { interval: 1, easeFactor: 2.5, repetitions: 0, due: T, lapses: 0 }
-  assert.deepEqual([updateSRS(card, 3, T, noFuzz).repetitions, updateSRS(card, 3, T, noFuzz).interval], [1, 1])
-  assert.equal(updateSRS(card, 5, T, noFuzz).interval, 4)
-  assert.equal(updateSRS(card, 0, T, noFuzz).repetitions, 0)
+  assert.deepEqual([updateSRS(card, 3, T, { fuzz: noFuzz }).repetitions, updateSRS(card, 3, T, { fuzz: noFuzz }).interval], [1, 1])
+  assert.equal(updateSRS(card, 5, T, { fuzz: noFuzz }).interval, 4)
+  assert.equal(updateSRS(card, 0, T, { fuzz: noFuzz }).repetitions, 0)
 })
 
 test('srs: review phase (Anki modified SM-2)', () => {
   const rev = { interval: 10, easeFactor: 2.5, repetitions: 2, due: T, lapses: 0 }
-  const hard = updateSRS(rev, 2, T, noFuzz)
+  const hard = updateSRS(rev, 2, T, { fuzz: noFuzz })
   assert.equal(hard.interval, 12)
   assert.ok(Math.abs(hard.easeFactor - 2.35) < 1e-9)
-  assert.equal(updateSRS(rev, 3, T, noFuzz).interval, 25)
-  assert.equal(updateSRS(rev, 5, T, noFuzz).interval, Math.round(10 * 2.65 * 1.3))
-  const lapse = updateSRS(rev, 0, T, noFuzz)
+  assert.equal(updateSRS(rev, 3, T, { fuzz: noFuzz }).interval, 25)
+  assert.equal(updateSRS(rev, 5, T, { fuzz: noFuzz }).interval, Math.round(10 * 2.65 * 1.3))
+  const lapse = updateSRS(rev, 0, T, { fuzz: noFuzz })
   assert.deepEqual([lapse.lapses, lapse.interval, lapse.repetitions], [1, 1, 1])
-  assert.ok(updateSRS({ ...rev, easeFactor: 1.3 }, 0, T, noFuzz).easeFactor >= 1.3, 'ease floor')
-  assert.equal(updateSRS(rev, 3, T, noFuzz).due, '2024-01-26')
+  assert.ok(updateSRS({ ...rev, easeFactor: 1.3 }, 0, T, { fuzz: noFuzz }).easeFactor >= 1.3, 'ease floor')
+  assert.equal(updateSRS(rev, 3, T, { fuzz: noFuzz }).due, '2024-01-26')
+})
+
+test('srs: repeat Again in one session is relearning, not another lapse', () => {
+  const rev = { interval: 30, easeFactor: 2.5, repetitions: 5, due: T, lapses: 0 }
+  let s = updateSRS(rev, 0, T, { fuzz: noFuzz })
+  for (let i = 0; i < 7; i++) s = updateSRS(s, 0, T, { fuzz: noFuzz, relearning: true })
+  assert.deepEqual([s.lapses, s.easeFactor, s.interval, s.due], [1, 2.3, 1, '2024-01-02'])
+  assert.equal(updateSRS(s, 3, T, { fuzz: noFuzz, relearning: true }).interval, 1, 'Good after relearning: 1 day')
+  const fresh = { interval: 1, easeFactor: 2.5, repetitions: 0, due: T, lapses: 0 }
+  assert.equal(updateSRS(fresh, 3, T, { relearning: true }).repetitions, 1, 'a new card still graduates')
+})
+
+test('log: only the first rating of a card counts, every clear counts', () => {
+  const first = { first: true, isNew: true }
+  const again = { first: false, isNew: true }
+  let s = applyRating(undefined, 0, first, 1)
+  s = applyRating(s, 0, again, 1)
+  s = applyRating(s, 3, again, 1)
+  assert.deepEqual([s.cardsReviewed, s.newReviewed, s.again, s.good, s.cleared], [1, 1, 1, 0, 1])
+  s = applyRating(s, 3, again, -1)
+  assert.deepEqual([s.cardsReviewed, s.cleared], [1, 0], 'undo of a repeat leaves the first rating')
+})
+
+test('backup: validation and history merge', () => {
+  const ok = { app: 'flashdeck', decks: [], cards: [], reviewLog: [] }
+  assert.doesNotThrow(() => parseBackup(ok))
+  assert.throws(() => parseBackup({ ...ok, reviewLog: [{}] }), /no date/)
+  assert.throws(() => parseBackup({ ...ok, cards: [{ id: 'a', deckId: 'd', srs: {} }] }), /schedule/)
+  const stored = { date: T, A: { cardsReviewed: 9 }, B: { cardsReviewed: 1 } }
+  const merged = mergeLogRow(stored, { date: T, A: { cardsReviewed: 3 }, B: { cardsReviewed: 4 }, C: { cardsReviewed: 2 } })
+  assert.deepEqual([merged.A.cardsReviewed, merged.B.cardsReviewed, merged.C.cardsReviewed], [9, 4, 2])
 })
 
 test('srs: fuzz, response time, daily limits', () => {

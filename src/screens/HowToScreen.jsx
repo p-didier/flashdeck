@@ -54,8 +54,10 @@ export default function HowToScreen() {
           optional extra line shown under the answer, and your own notes.
         </p>
         <p>
-          The Batch tab adds many at once. Write one card per line as <code>front = back</code>. Put <code>!</code> or{' '}
-          <code>!!</code> at the start of a line to mark it important or crucial.
+          The Batch tab adds many at once. Write one card per line, or per <code>;</code>, as{' '}
+          <code>front = back</code>. Put <code>!</code> or <code>!!</code> at the start of a line to mark it important
+          or crucial. The first <code>=</code> splits front from back, so add a front that contains <code>=</code> in
+          the Single tab.
         </p>
         <p>Tap any card in Browse to see it, edit it or delete it.</p>
       </Section>
@@ -78,12 +80,16 @@ export default function HowToScreen() {
           <strong>Back up all decks</strong> on the Import screen now and then, and keep the file somewhere else. Home
           reminds you after a week without a backup.
         </p>
+        <p>
+          On an iPhone or iPad, Safari deletes the cards of a website you have not opened for 7 days of browsing. Add
+          flashdeck to the Home Screen (below) and always open it from there, which keeps the cards.
+        </p>
       </Section>
 
       <Section title="Installing on a phone">
         <p>
-          Open the app in Chrome or Safari and choose <strong>Add to Home Screen</strong> from the browser menu. It then
-          opens like an app and works offline.
+          Open the app in Chrome or Safari and choose <strong>Add to Home Screen</strong> from the browser menu (the
+          Share button in Safari). It then opens like an app and works offline.
         </p>
       </Section>
     </div>
