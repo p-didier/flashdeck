@@ -1,0 +1,17 @@
+[
+  { "front": "Australia", "back": "Canberra", "extra": "Not Sydney. The site was picked in 1908 as a compromise between Sydney and Melbourne.", "importance": "crucial", "tags": ["oceania"] },
+  { "front": "Brazil", "back": "Brasília", "extra": "Built from scratch, capital since 1960. Before that, Rio de Janeiro.", "importance": "crucial", "tags": ["south-america"] },
+  { "front": "Turkey", "back": "Ankara", "extra": "Capital since 1923. Istanbul is the largest city.", "importance": "crucial", "tags": ["europe", "asia"], "notes": "Atatürk moved it to Ankara." },
+  { "front": "Canada", "back": "Ottawa", "extra": "In Ontario, on the Ottawa River.", "importance": "important", "tags": ["north-america"] },
+  { "front": "Switzerland", "back": "Bern", "extra": "Officially the 'federal city'. Zürich is the largest city.", "importance": "important", "tags": ["europe"] },
+  { "front": "Nigeria", "back": "Abuja", "extra": "Capital since 1991, replacing Lagos.", "importance": "important", "tags": ["africa"] },
+  { "front": "Morocco", "back": "Rabat", "extra": "Casablanca is the largest city.", "importance": "important", "tags": ["africa"] },
+  { "front": "New Zealand", "back": "Wellington", "extra": "Auckland is the largest city.", "importance": "important", "tags": ["oceania"] },
+  { "front": "Vietnam", "back": "Hanoi", "extra": "Ho Chi Minh City is the largest city.", "importance": "important", "tags": ["asia"] },
+  { "front": "Japan", "back": "Tokyo", "tags": ["asia"] },
+  { "front": "Egypt", "back": "Cairo", "extra": "On the Nile.", "tags": ["africa"] },
+  { "front": "Kenya", "back": "Nairobi", "tags": ["africa"] },
+  { "front": "Peru", "back": "Lima", "tags": ["south-america"] },
+  { "front": "Norway", "back": "Oslo", "tags": ["europe"] },
+  { "front": "Mongolia", "back": "Ulaanbaatar", "extra": "Coldest national capital on average.", "tags": ["asia"] }
+]
